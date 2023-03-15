@@ -11,7 +11,7 @@ from torchvision import datasets, transforms
 from TrainModel import train_model
 from TestModel import test_model
 from torchvision import models
-
+from collections import OrderedDict
 
 data_dir = 'imagedata-50/'
 train_data = data_dir + 'train/'
@@ -64,8 +64,8 @@ test_set = datasets.ImageFolder(train_data, transform=data_transforms['test'])
 
 
 train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size,
-                                           num_workers=num_workers)
-valid_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size,
+                                           num_workers=num_workers, shuffle=True)
+val_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size,
                                            num_workers=num_workers)
 test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size, 
                                            num_workers=num_workers)
@@ -99,11 +99,11 @@ model.classifier = nn.Sequential(*features)
 # 4. train_lr_scheduler 
 
 #<<<YOUR CODE HERE>>>
-num_epochs = 3 # Transfer learning maximally needs 10 epochs
+num_epochs = 5 # Transfer learning maximally needs 10 epochs
 criterion = nn.CrossEntropyLoss()
 
-optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.8)
-train_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=6, gamma=0.1)
+optimizer = optim.Adam(model.parameters(), lr=0.0007)
+train_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.5)
 
 # When you have all the parameters in place, uncomment these to use the functions imported above
 def main():
