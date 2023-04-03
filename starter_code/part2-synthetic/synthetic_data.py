@@ -126,21 +126,145 @@ def generate_fake(mu, logvar, no_samples, scaler, model):
 # When you have all the code in place to generate synthetic data, uncomment the code below to run the model and the tests. 
 def main():
     # Get a device and set up data paths. You need paths for the original data, the data with just loan status = 1 and the new augmented dataset.
+  
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+
+    # Load the loan_continuous.csv file
+    ORIGINAL_DATA_PATH = 'data/loan_continuous.csv'
+    data = pd.read_csv(ORIGINAL_DATA_PATH)
+
+
+
+    data_o = data.copy()
+    # Filter the dataset to only include records with Loan Status = 1
     # Split the data out with loan status = 1
+    data_imbalanced = data[data['Loan Status'] == 1]
 
+    # Now because this subset must be fed into the VAE, and the functions above are supposed to be used
+    # we nned to export the subset to csv to load the path below.
+    data_imbalanced.to_csv('data/loan_1_subset.csv', index=False)
+
+    INPUT_DATA_PATH = 'data/loan_1_subset.csv'
     # Create DataLoaders for training and validation 
+    train_data = DataBuilder(INPUT_DATA_PATH)
 
+    #train_data, val_data = builder.get_datasets()
+    val_data = DataBuilder(INPUT_DATA_PATH, train=False)
+
+    # Define the DataLoader for the training dataset
+    batch_size = 16
+
+    trainloader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
+
+    scaler = trainloader.dataset.standardizer
+
+    # Define the DataLoader for the validation dataset
+    valloader = DataLoader(val_data, batch_size=batch_size, shuffle=False)
+    
+    
     # Train and validate the model 
 
-    #scaler = trainloader.dataset.standardizer
-    #fake_data = generate_fake(mu, logvar, 50000, scaler, model)
+    autoencoder = Autoencoder(D_in=24)
 
+    data , mu, logvar = autoencoder(torch.Tensor(train_data.x))
+    custom_loss = CustomLoss()
+    # Define the optimizer and the learning rate scheduler
+    optimizer = torch.optim.Adam(autoencoder.parameters(), lr=0.0001)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.5)
+
+
+    # hyperparameters
+    num_epochs = 1000
+
+    # counter and checkpointing
+    best_val_loss = float('inf')
+    epoch = 0
+
+    # Define the training loop
+    for _ in range(num_epochs):
+       autoencoder.train()
+       
+       epoch += 1
+       train_loss = 0.0
+       for batch in trainloader:
+           optimizer.zero_grad()
+           inputs = batch.float().to(device)
+           outputs, mu, logvar = autoencoder(inputs)
+           loss = custom_loss(inputs, outputs, mu, logvar)
+           loss.backward()
+           optimizer.step()
+           train_loss += loss.item() * inputs.size(0)
+       train_loss /= len(trainloader.dataset)
+
+       # Evaluate the performance on the validation dataset
+       autoencoder.eval()
+       val_loss = 0.0
+       with torch.no_grad():
+           for batch in valloader:
+               inputs = batch.float().to(device)
+               outputs, mu, logvar = autoencoder(inputs)
+               loss = custom_loss(inputs, outputs, mu, logvar)
+               val_loss += loss.item() * inputs.size(0)
+           val_loss /= len(valloader.dataset)
+
+       if epoch % 20 == 0:
+           print(f" Epoch: {epoch}... Training Loss: {train_loss}... Validation Loss: {val_loss} ")
+          # print(f"Training Loss: {train_loss}")
+          # print(f"Training Loss: {train_loss}")
+
+       # Update the learning rate scheduler
+       scheduler.step()
+
+    # Save the weights if the validation loss is lower than the previous best validation loss
+       if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            torch.save(autoencoder.state_dict(), 'autoencoder.pt')
+
+
+    fake_data = generate_fake(mu, logvar, 50000, scaler, autoencoder)
+
+    # Convert the generated synthetic data to a pandas DataFrame
+    fake_data_df = pd.DataFrame(fake_data, columns=data_imbalanced.columns)
+
+    # Convert float values to categorical 0 or 1 values depending on threshold
+    threshold = 0.5
+
+    # Define a function to apply to each element in the loan status column
+    def categorize_loan_status(value):
+        if value >= threshold:
+            return 1
+        else:
+            return 0
+
+    # Apply the categorize_loan_status function to the loan status column
+    fake_data_df['Loan Status'] = fake_data_df['Loan Status'].apply(categorize_loan_status)
+    
+    fake_data_df.to_csv('data/fake.csv', index=False)
+    # Concatenate the new data with original dataset
+    combined_data = pd.concat([data_o, fake_data_df], axis=0)
+    
     # Combine the new data with original dataset
+    #combined_data = pd.concat([data_imbalanced, fake_data], axis=0)
+
+    combined_data = combined_data.sample(frac=1).reset_index(drop=True)
+    # export the DataFrame to a CSV file
+    
+
+
 
     DATA_PATH = 'data/loan_continuous_expanded.csv'
+    combined_data.to_csv(DATA_PATH, index=False)
+    
+   
     test_model(DATA_PATH)
-
+    print("Above scores are for the expanded dataset including synthetic data")
+    print()
+    print()
+    print("Below scores are for the original imbalanced dataset, for comparison:")
+    test_model(ORIGINAL_DATA_PATH)
 if __name__ == '__main__':
     main()
     print("done")
+
+
